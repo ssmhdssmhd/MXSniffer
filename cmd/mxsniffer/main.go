@@ -15,7 +15,7 @@ import (
 	"github.com/ssmhdssmhd/MXSniffer/internal/sniffer"
 )
 
-const version = "0.0.4"
+const version = "0.0.5"
 
 type config struct {
 	listenAddr     string
@@ -24,6 +24,7 @@ type config struct {
 	userAgent      string
 	requestTimeout time.Duration
 	attemptWait    time.Duration
+	minDuration    time.Duration
 	maxConcurrent  int
 }
 
@@ -45,6 +46,7 @@ func run() error {
 		ParserTemplate: cfg.parserTemplate,
 		UserAgent:      cfg.userAgent,
 		AttemptWait:    cfg.attemptWait,
+		MinDuration:    cfg.minDuration,
 	})
 	if err != nil {
 		return fmt.Errorf("configure browser: %w", err)
@@ -93,6 +95,7 @@ func loadConfig() (config, error) {
 		userAgent:      sniffer.DefaultUserAgent,
 		requestTimeout: 45 * time.Second,
 		attemptWait:    8 * time.Second,
+		minDuration:    60 * time.Second,
 		maxConcurrent:  2,
 	}
 
@@ -106,6 +109,9 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	if cfg.attemptWait, err = environmentDuration("ATTEMPT_WAIT", cfg.attemptWait); err != nil {
+		return config{}, err
+	}
+	if cfg.minDuration, err = environmentOptionalDuration("MIN_MEDIA_DURATION", cfg.minDuration); err != nil {
 		return config{}, err
 	}
 	if cfg.maxConcurrent, err = environmentInt("MAX_CONCURRENT_REQUESTS", cfg.maxConcurrent); err != nil {
@@ -129,6 +135,18 @@ func environmentDuration(key string, fallback time.Duration) (time.Duration, err
 	parsed, err := time.ParseDuration(value)
 	if err != nil || parsed <= 0 {
 		return 0, fmt.Errorf("%s must be a positive duration", key)
+	}
+	return parsed, nil
+}
+
+func environmentOptionalDuration(key string, fallback time.Duration) (time.Duration, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative duration", key)
 	}
 	return parsed, nil
 }

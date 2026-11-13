@@ -33,6 +33,7 @@ type BrowserConfig struct {
 	ParserTemplate string
 	UserAgent      string
 	AttemptWait    time.Duration
+	MinDuration    time.Duration
 }
 
 type Browser struct {
@@ -40,6 +41,7 @@ type Browser struct {
 	parserTemplate string
 	userAgent      string
 	attemptWait    time.Duration
+	minDuration    time.Duration
 }
 
 func NewBrowser(cfg BrowserConfig) (*Browser, error) {
@@ -53,6 +55,9 @@ func NewBrowser(cfg BrowserConfig) (*Browser, error) {
 	if cfg.AttemptWait <= 0 {
 		return nil, errors.New("ATTEMPT_WAIT must be positive")
 	}
+	if cfg.MinDuration < 0 {
+		return nil, errors.New("MIN_MEDIA_DURATION must not be negative")
+	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = DefaultUserAgent
 	}
@@ -62,6 +67,7 @@ func NewBrowser(cfg BrowserConfig) (*Browser, error) {
 		parserTemplate: cfg.ParserTemplate,
 		userAgent:      cfg.UserAgent,
 		attemptWait:    cfg.AttemptWait,
+		minDuration:    cfg.MinDuration,
 	}
 	if _, err := browser.targetURL("https://example.com/video"); err != nil {
 		return nil, err
@@ -111,6 +117,7 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 
 	var bestURL string
 	bestScore := 0
+	rejected := make(map[string]bool)
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt == 0 {
 			err = chromedp.Run(browserContext,
@@ -132,13 +139,21 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		for waiting {
 			select {
 			case candidate := <-mediaURLs:
+				if candidate.url == "" || rejected[candidate.url] {
+					continue
+				}
 				if candidate.score > bestScore {
 					bestURL, bestScore = candidate.url, candidate.score
 				}
-				if bestScore >= bestMediaScore {
+				if bestScore < bestMediaScore {
+					continue
+				}
+				if b.acceptsDuration(ctx, bestURL) {
 					timer.Stop()
 					return bestURL, nil
 				}
+				rejected[bestURL] = true
+				bestURL, bestScore = "", 0
 			case <-timer.C:
 				waiting = false
 			case <-ctx.Done():
@@ -148,7 +163,7 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		}
 	}
 
-	if bestURL != "" {
+	if bestURL != "" && !rejected[bestURL] && b.acceptsDuration(ctx, bestURL) {
 		return bestURL, nil
 	}
 	return "", ErrNotFound
