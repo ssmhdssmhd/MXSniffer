@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/emulation"
@@ -19,10 +20,16 @@ import (
 const DefaultUserAgent = "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 const bestMediaScore = 3
+const mediaCacheCapacity = 256
 
 type mediaCandidate struct {
 	url   string
 	score int
+}
+
+type mediaCacheEntry struct {
+	url       string
+	expiresAt time.Time
 }
 
 var (
@@ -36,6 +43,7 @@ type BrowserConfig struct {
 	UserAgent      string
 	AttemptWait    time.Duration
 	MinDuration    time.Duration
+	CacheTTL       time.Duration
 }
 
 type Browser struct {
@@ -44,6 +52,9 @@ type Browser struct {
 	userAgent      string
 	attemptWait    time.Duration
 	minDuration    time.Duration
+	cacheTTL       time.Duration
+	cacheMutex     sync.Mutex
+	cache          map[string]mediaCacheEntry
 	official       *officialResolver
 }
 
@@ -61,6 +72,9 @@ func NewBrowser(cfg BrowserConfig) (*Browser, error) {
 	if cfg.MinDuration < 0 {
 		return nil, errors.New("MIN_MEDIA_DURATION must not be negative")
 	}
+	if cfg.CacheTTL < 0 {
+		return nil, errors.New("CACHE_TTL must not be negative")
+	}
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = DefaultUserAgent
 	}
@@ -71,6 +85,8 @@ func NewBrowser(cfg BrowserConfig) (*Browser, error) {
 		userAgent:      cfg.UserAgent,
 		attemptWait:    cfg.AttemptWait,
 		minDuration:    cfg.MinDuration,
+		cacheTTL:       cfg.CacheTTL,
+		cache:          make(map[string]mediaCacheEntry),
 		official:       newOfficialResolver(cfg.UserAgent),
 	}
 	if _, err := browser.targetURL("https://example.com/video"); err != nil {
@@ -88,6 +104,19 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 	if isMediaURL(normalized, "") {
 		return normalized, nil
 	}
+	if cached := b.cachedMediaURL(normalized); cached != "" {
+		return cached, nil
+	}
+
+	ctx = withPlaylistCache(ctx)
+	mediaURL, err := b.sniffNormalized(ctx, normalized)
+	if err == nil {
+		b.storeMediaURL(normalized, mediaURL)
+	}
+	return mediaURL, err
+}
+
+func (b *Browser) sniffNormalized(ctx context.Context, normalized string) (string, error) {
 	if mediaURL, err := b.official.resolve(ctx, normalized); err == nil {
 		return mediaURL, nil
 	}
@@ -196,6 +225,44 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		}
 	}
 	return "", ErrNotFound
+}
+
+func (b *Browser) cachedMediaURL(key string) string {
+	if b.cacheTTL <= 0 {
+		return ""
+	}
+	b.cacheMutex.Lock()
+	defer b.cacheMutex.Unlock()
+	entry, ok := b.cache[key]
+	if !ok {
+		return ""
+	}
+	if time.Now().After(entry.expiresAt) {
+		delete(b.cache, key)
+		return ""
+	}
+	return entry.url
+}
+
+func (b *Browser) storeMediaURL(key, mediaURL string) {
+	if b.cacheTTL <= 0 || mediaURL == "" {
+		return
+	}
+	now := time.Now()
+	b.cacheMutex.Lock()
+	defer b.cacheMutex.Unlock()
+	for cachedKey, entry := range b.cache {
+		if now.After(entry.expiresAt) {
+			delete(b.cache, cachedKey)
+		}
+	}
+	if len(b.cache) >= mediaCacheCapacity {
+		for cachedKey := range b.cache {
+			delete(b.cache, cachedKey)
+			break
+		}
+	}
+	b.cache[key] = mediaCacheEntry{url: mediaURL, expiresAt: now.Add(b.cacheTTL)}
 }
 
 func (b *Browser) targetURL(videoURL string) (string, error) {

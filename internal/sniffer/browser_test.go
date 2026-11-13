@@ -2,6 +2,7 @@ package sniffer
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -99,6 +100,7 @@ func TestNewBrowserRejectsInvalidConfig(t *testing.T) {
 		{name: "missing placeholder", mutate: func(cfg *BrowserConfig) { cfg.ParserTemplate = "https://parser.example.com" }},
 		{name: "invalid parser scheme", mutate: func(cfg *BrowserConfig) { cfg.ParserTemplate = "file:///tmp/{url}" }},
 		{name: "attempt wait", mutate: func(cfg *BrowserConfig) { cfg.AttemptWait = 0 }},
+		{name: "cache TTL", mutate: func(cfg *BrowserConfig) { cfg.CacheTTL = -time.Second }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -130,5 +132,41 @@ func TestSniffReturnsDirectMediaWithoutBrowser(t *testing.T) {
 	}
 	if got != mediaURL {
 		t.Fatalf("Sniff() = %q, want %q", got, mediaURL)
+	}
+}
+
+func TestMediaCache(t *testing.T) {
+	t.Parallel()
+	browser := &Browser{cacheTTL: time.Minute, cache: make(map[string]mediaCacheEntry)}
+	const key = "https://example.com/watch?v=1"
+	const mediaURL = "https://cdn.example.com/master.m3u8"
+	if got := browser.cachedMediaURL(key); got != "" {
+		t.Fatalf("empty cache returned %q", got)
+	}
+	browser.storeMediaURL(key, mediaURL)
+	if got := browser.cachedMediaURL(key); got != mediaURL {
+		t.Fatalf("cachedMediaURL() = %q, want %q", got, mediaURL)
+	}
+
+	browser.cacheMutex.Lock()
+	entry := browser.cache[key]
+	entry.expiresAt = time.Now().Add(-time.Second)
+	browser.cache[key] = entry
+	browser.cacheMutex.Unlock()
+	if got := browser.cachedMediaURL(key); got != "" {
+		t.Fatalf("expired cache returned %q", got)
+	}
+
+	for index := 0; index < mediaCacheCapacity+10; index++ {
+		browser.storeMediaURL(fmt.Sprintf("%s-%d", key, index), mediaURL)
+	}
+	if len(browser.cache) > mediaCacheCapacity {
+		t.Fatalf("cache size = %d, want <= %d", len(browser.cache), mediaCacheCapacity)
+	}
+
+	disabled := &Browser{cache: make(map[string]mediaCacheEntry)}
+	disabled.storeMediaURL(key, mediaURL)
+	if got := disabled.cachedMediaURL(key); got != "" {
+		t.Fatalf("disabled cache returned %q", got)
 	}
 }

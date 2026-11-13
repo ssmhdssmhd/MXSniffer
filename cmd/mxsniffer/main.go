@@ -15,7 +15,7 @@ import (
 	"github.com/ssmhdssmhd/MXSniffer/internal/sniffer"
 )
 
-const version = "0.0.10"
+const version = "0.0.11"
 
 type config struct {
 	listenAddr     string
@@ -25,6 +25,7 @@ type config struct {
 	requestTimeout time.Duration
 	attemptWait    time.Duration
 	minDuration    time.Duration
+	cacheTTL       time.Duration
 	maxConcurrent  int
 }
 
@@ -47,6 +48,7 @@ func run() error {
 		UserAgent:      cfg.userAgent,
 		AttemptWait:    cfg.attemptWait,
 		MinDuration:    cfg.minDuration,
+		CacheTTL:       cfg.cacheTTL,
 	})
 	if err != nil {
 		return fmt.Errorf("configure browser: %w", err)
@@ -97,6 +99,7 @@ func loadConfig() (config, error) {
 		requestTimeout: 45 * time.Second,
 		attemptWait:    8 * time.Second,
 		minDuration:    60 * time.Second,
+		cacheTTL:       2 * time.Minute,
 		maxConcurrent:  2,
 	}
 
@@ -113,6 +116,9 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	if cfg.minDuration, err = environmentOptionalDuration("MIN_MEDIA_DURATION", cfg.minDuration); err != nil {
+		return config{}, err
+	}
+	if cfg.cacheTTL, err = environmentOptionalDuration("CACHE_TTL", cfg.cacheTTL); err != nil {
 		return config{}, err
 	}
 	if cfg.maxConcurrent, err = environmentInt("MAX_CONCURRENT_REQUESTS", cfg.maxConcurrent); err != nil {

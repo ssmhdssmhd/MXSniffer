@@ -17,6 +17,23 @@ const (
 	playlistTimeout = 10 * time.Second
 )
 
+type playlistCacheKey struct{}
+
+type playlistResult struct {
+	body []byte
+	base *url.URL
+}
+
+type playlistCache struct {
+	entries map[string]playlistResult
+}
+
+// withPlaylistCache shares playlist downloads between duration validation and
+// origin resolution within one sniff request.
+func withPlaylistCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, playlistCacheKey{}, &playlistCache{entries: make(map[string]playlistResult)})
+}
+
 // acceptsDuration reports whether a captured playback URL is long enough.
 // Only HLS manifests can be measured reliably; live streams and formats
 // whose duration cannot be determined are allowed through.
@@ -138,6 +155,13 @@ func hlsDuration(ctx context.Context, rawURL, userAgent string) (time.Duration, 
 }
 
 func fetchPlaylist(ctx context.Context, rawURL, userAgent string) ([]byte, *url.URL, error) {
+	cache, _ := ctx.Value(playlistCacheKey{}).(*playlistCache)
+	if cache != nil {
+		if cached, ok := cache.entries[rawURL]; ok {
+			return cached.body, cached.base, nil
+		}
+	}
+
 	requestContext, cancel := context.WithTimeout(ctx, playlistTimeout)
 	defer cancel()
 
@@ -157,7 +181,11 @@ func fetchPlaylist(ctx context.Context, rawURL, userAgent string) ([]byte, *url.
 	if err != nil {
 		return nil, nil, err
 	}
-	return body, response.Request.URL, nil
+	result := playlistResult{body: body, base: response.Request.URL}
+	if cache != nil {
+		cache.entries[rawURL] = result
+	}
+	return result.body, result.base, nil
 }
 
 func isHLSPlaylist(body []byte) bool {

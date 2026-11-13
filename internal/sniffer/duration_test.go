@@ -160,3 +160,29 @@ func TestSourcePlaylistURLLeavesOtherFormats(t *testing.T) {
 		t.Fatalf("sourcePlaylistURL() = %q, want %q", got, rawURL)
 	}
 }
+
+func TestFetchPlaylistUsesRequestCache(t *testing.T) {
+	t.Parallel()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+		fmt.Fprint(writer, "#EXTM3U\n#EXTINF:4,\na.ts\n#EXT-X-ENDLIST\n")
+	}))
+	defer server.Close()
+
+	ctx := withPlaylistCache(context.Background())
+	first, _, err := fetchPlaylist(ctx, server.URL+"/media.m3u8", DefaultUserAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := fetchPlaylist(ctx, server.URL+"/media.m3u8", DefaultUserAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Fatal("cached playlist content differs")
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
