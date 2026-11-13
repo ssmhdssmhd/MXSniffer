@@ -84,6 +84,7 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	normalized = unwrapTargetURL(normalized)
 	if isMediaURL(normalized, "") {
 		return normalized, nil
 	}
