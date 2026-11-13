@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,78 @@ func (b *Browser) acceptsDuration(ctx context.Context, rawURL string) bool {
 		return true
 	}
 	return total >= b.minDuration
+}
+
+// sourcePlaylistURL replaces an expiring redirect wrapper with the origin HLS
+// playlist when the standard index.m3u8 exists beside its segments. The origin
+// playlist must reference the same segment, otherwise the wrapper is retained.
+func (b *Browser) sourcePlaylistURL(ctx context.Context, rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	if ext != ".m3u8" && ext != ".m3u" {
+		return rawURL
+	}
+
+	body, base, err := fetchPlaylist(ctx, rawURL, b.userAgent)
+	if err != nil || !isHLSPlaylist(body) {
+		return rawURL
+	}
+	if _, master := masterVariant(body, base); master {
+		return rawURL
+	}
+	segment := firstPlaylistSegment(body)
+	if segment == "" {
+		return rawURL
+	}
+	segmentReference, err := url.Parse(segment)
+	if err != nil {
+		return rawURL
+	}
+	segmentURL := base.ResolveReference(segmentReference)
+	if segmentURL.Host == base.Host {
+		return rawURL
+	}
+
+	indexURL := *segmentURL
+	indexURL.Path = path.Join(path.Dir(segmentURL.Path), "index.m3u8")
+	indexURL.RawPath = ""
+	originURL := indexURL.String()
+	originBody, originBase, err := fetchPlaylist(ctx, originURL, b.userAgent)
+	if err != nil || !isHLSPlaylist(originBody) {
+		return rawURL
+	}
+	if !playlistHasSegment(originBody, originBase, segmentURL) {
+		return rawURL
+	}
+	return originURL
+}
+
+func firstPlaylistSegment(body []byte) string {
+	for _, line := range playlistLines(body) {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			return line
+		}
+	}
+	return ""
+}
+
+func playlistHasSegment(body []byte, base, wanted *url.URL) bool {
+	for _, line := range playlistLines(body) {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		reference, err := url.Parse(line)
+		if err != nil {
+			continue
+		}
+		if base.ResolveReference(reference).Path == wanted.Path {
+			return true
+		}
+	}
+	return false
 }
 
 func hlsDuration(ctx context.Context, rawURL, userAgent string) (time.Duration, bool) {

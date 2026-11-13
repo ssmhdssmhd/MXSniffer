@@ -143,7 +143,7 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 			return "", false
 		}
 		if b.acceptsDuration(ctx, candidate.url) {
-			return candidate.url, true
+			return b.sourcePlaylistURL(ctx, candidate.url), true
 		}
 		rejected[candidate.url] = true
 		slog.Warn("media candidate rejected", "url", candidate.url, "reason", "duration")
@@ -192,7 +192,7 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 			continue
 		}
 		if b.acceptsDuration(ctx, candidate.url) {
-			return candidate.url, nil
+			return b.sourcePlaylistURL(ctx, candidate.url), nil
 		}
 	}
 	return "", ErrNotFound

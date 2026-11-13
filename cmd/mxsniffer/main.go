@@ -15,7 +15,7 @@ import (
 	"github.com/ssmhdssmhd/MXSniffer/internal/sniffer"
 )
 
-const version = "0.0.9"
+const version = "0.0.10"
 
 type config struct {
 	listenAddr     string

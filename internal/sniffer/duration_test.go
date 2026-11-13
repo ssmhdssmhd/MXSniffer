@@ -114,3 +114,49 @@ func TestAcceptsDuration(t *testing.T) {
 		t.Fatal("non-HLS media should be accepted without duration check")
 	}
 }
+
+func TestSourcePlaylistURL(t *testing.T) {
+	t.Parallel()
+	origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/movie/hls/index.m3u8" {
+			http.NotFound(writer, request)
+			return
+		}
+		fmt.Fprint(writer, "#EXTM3U\n#EXTINF:4,\nsegment0.ts\n#EXT-X-ENDLIST\n")
+	}))
+	defer origin.Close()
+
+	wrapper := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/wrapped.m3u8":
+			fmt.Fprintf(writer, "#EXTM3U\n#EXTINF:4,\n%s/movie/hls/segment0.ts\n#EXT-X-ENDLIST\n", origin.URL)
+		case "/missing.m3u8":
+			fmt.Fprintf(writer, "#EXTM3U\n#EXTINF:4,\n%s/missing/segment0.ts\n#EXT-X-ENDLIST\n", origin.URL)
+		case "/mismatch.m3u8":
+			fmt.Fprintf(writer, "#EXTM3U\n#EXTINF:4,\n%s/movie/hls/other.ts\n#EXT-X-ENDLIST\n", origin.URL)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer wrapper.Close()
+
+	browser := &Browser{userAgent: DefaultUserAgent}
+	if got := browser.sourcePlaylistURL(context.Background(), wrapper.URL+"/wrapped.m3u8"); got != origin.URL+"/movie/hls/index.m3u8" {
+		t.Fatalf("sourcePlaylistURL() = %q, want origin index", got)
+	}
+	for _, path := range []string{"/missing.m3u8", "/mismatch.m3u8"} {
+		rawURL := wrapper.URL + path
+		if got := browser.sourcePlaylistURL(context.Background(), rawURL); got != rawURL {
+			t.Fatalf("sourcePlaylistURL(%q) = %q, want original wrapper", path, got)
+		}
+	}
+}
+
+func TestSourcePlaylistURLLeavesOtherFormats(t *testing.T) {
+	t.Parallel()
+	browser := &Browser{userAgent: DefaultUserAgent}
+	rawURL := "https://cdn.example.com/movie.mp4"
+	if got := browser.sourcePlaylistURL(context.Background(), rawURL); got != rawURL {
+		t.Fatalf("sourcePlaylistURL() = %q, want %q", got, rawURL)
+	}
+}
