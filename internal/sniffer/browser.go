@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -115,9 +117,33 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		return "", fmt.Errorf("initialize Lightpanda session: %w", err)
 	}
 
-	var bestURL string
-	bestScore := 0
+	var pending []mediaCandidate
+	seen := make(map[string]bool)
 	rejected := make(map[string]bool)
+
+	tryCandidate := func(candidate mediaCandidate) (string, bool) {
+		if candidate.url == "" || seen[candidate.url] {
+			return "", false
+		}
+		seen[candidate.url] = true
+		// A single TS/fMP4 segment plays only a few seconds, so it is never a
+		// valid answer while a minimum duration is enforced.
+		if candidate.score < 2 && b.minDuration > 0 {
+			slog.Debug("skip media segment", "url", candidate.url)
+			return "", false
+		}
+		pending = append(pending, candidate)
+		if candidate.score < bestMediaScore {
+			return "", false
+		}
+		if b.acceptsDuration(ctx, candidate.url) {
+			return candidate.url, true
+		}
+		rejected[candidate.url] = true
+		slog.Warn("media candidate rejected", "url", candidate.url, "reason", "duration")
+		return "", false
+	}
+
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt == 0 {
 			err = chromedp.Run(browserContext,
@@ -139,21 +165,10 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		for waiting {
 			select {
 			case candidate := <-mediaURLs:
-				if candidate.url == "" || rejected[candidate.url] {
-					continue
-				}
-				if candidate.score > bestScore {
-					bestURL, bestScore = candidate.url, candidate.score
-				}
-				if bestScore < bestMediaScore {
-					continue
-				}
-				if b.acceptsDuration(ctx, bestURL) {
+				if foundURL, ok := tryCandidate(candidate); ok {
 					timer.Stop()
-					return bestURL, nil
+					return foundURL, nil
 				}
-				rejected[bestURL] = true
-				bestURL, bestScore = "", 0
 			case <-timer.C:
 				waiting = false
 			case <-ctx.Done():
@@ -163,8 +178,16 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		}
 	}
 
-	if bestURL != "" && !rejected[bestURL] && b.acceptsDuration(ctx, bestURL) {
-		return bestURL, nil
+	sort.SliceStable(pending, func(i, j int) bool {
+		return pending[i].score > pending[j].score
+	})
+	for _, candidate := range pending {
+		if rejected[candidate.url] {
+			continue
+		}
+		if b.acceptsDuration(ctx, candidate.url) {
+			return candidate.url, nil
+		}
 	}
 	return "", ErrNotFound
 }
