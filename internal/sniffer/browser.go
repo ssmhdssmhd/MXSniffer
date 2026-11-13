@@ -16,6 +16,13 @@ import (
 
 const DefaultUserAgent = "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+const bestMediaScore = 3
+
+type mediaCandidate struct {
+	url   string
+	score int
+}
+
 var (
 	ErrInvalidURL = errors.New("a valid HTTP(S) URL parameter is required")
 	ErrNotFound   = errors.New("failed to extract video URL")
@@ -81,14 +88,15 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 	browserContext, cancelBrowser := chromedp.NewContext(allocatorContext, chromedp.WithNewBrowserContext())
 	defer cancelBrowser()
 
-	mediaURLs := make(chan string, 1)
+	mediaURLs := make(chan mediaCandidate, 16)
 	chromedp.ListenTarget(browserContext, func(event any) {
 		candidate, mimeType := mediaEvent(event)
-		if candidate == "" || !isMediaURL(candidate, mimeType) {
+		score := mediaScore(candidate, mimeType)
+		if score == 0 {
 			return
 		}
 		select {
-		case mediaURLs <- candidate:
+		case mediaURLs <- mediaCandidate{url: candidate, score: score}:
 		default:
 		}
 	})
@@ -101,6 +109,8 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		return "", fmt.Errorf("initialize Lightpanda session: %w", err)
 	}
 
+	var bestURL string
+	bestScore := 0
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt == 0 {
 			err = chromedp.Run(browserContext,
@@ -118,23 +128,30 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 		}
 
 		timer := time.NewTimer(b.attemptWait)
-		select {
-		case mediaURL := <-mediaURLs:
-			timer.Stop()
-			return mediaURL, nil
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			return "", ctx.Err()
+		waiting := true
+		for waiting {
+			select {
+			case candidate := <-mediaURLs:
+				if candidate.score > bestScore {
+					bestURL, bestScore = candidate.url, candidate.score
+				}
+				if bestScore >= bestMediaScore {
+					timer.Stop()
+					return bestURL, nil
+				}
+			case <-timer.C:
+				waiting = false
+			case <-ctx.Done():
+				timer.Stop()
+				return "", ctx.Err()
+			}
 		}
 	}
 
-	select {
-	case mediaURL := <-mediaURLs:
-		return mediaURL, nil
-	default:
-		return "", ErrNotFound
+	if bestURL != "" {
+		return bestURL, nil
 	}
+	return "", ErrNotFound
 }
 
 func (b *Browser) targetURL(videoURL string) (string, error) {
@@ -169,20 +186,47 @@ func mediaEvent(event any) (string, string) {
 }
 
 func isMediaURL(rawURL, mimeType string) bool {
+	return mediaScore(rawURL, mimeType) > 0
+}
+
+// mediaScore ranks playback candidates. Manifests score highest so a segment
+// captured first cannot hide the real playlist; segments still match as a
+// fallback when no manifest is available.
+func mediaScore(rawURL, mimeType string) int {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return false
+		return 0
 	}
-	path := strings.ToLower(parsed.Path)
-	if strings.HasSuffix(path, ".m3u8") || strings.HasSuffix(path, ".mp4") {
-		return true
+
+	ext := ""
+	if index := strings.LastIndex(parsed.Path, "."); index >= 0 {
+		ext = strings.ToLower(parsed.Path[index:])
+	}
+	switch ext {
+	case ".m3u8", ".m3u", ".mpd", ".f4m", ".ism":
+		return bestMediaScore
+	case ".mp4", ".m4v", ".webm", ".mkv", ".flv", ".mov", ".avi", ".wmv", ".3gp", ".ogv", ".f4v", ".m2ts", ".mts",
+		".m4a", ".aac", ".mp3", ".ogg", ".oga", ".opus", ".wav", ".flac":
+		return 2
+	case ".m4s", ".ts":
+		return 1
 	}
 
 	mimeType = strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
-	switch mimeType {
-	case "application/vnd.apple.mpegurl", "application/x-mpegurl", "application/mpegurl", "audio/mpegurl", "audio/x-mpegurl", "video/mp4", "application/mp4":
-		return true
+	switch {
+	case mimeType == "application/vnd.apple.mpegurl",
+		mimeType == "application/x-mpegurl",
+		mimeType == "application/mpegurl",
+		mimeType == "audio/mpegurl",
+		mimeType == "audio/x-mpegurl",
+		mimeType == "application/dash+xml",
+		mimeType == "application/vnd.ms-sstr+xml",
+		mimeType == "application/f4m",
+		mimeType == "video/x-f4m":
+		return bestMediaScore
+	case strings.HasPrefix(mimeType, "video/"), strings.HasPrefix(mimeType, "audio/"):
+		return 2
 	default:
-		return false
+		return 0
 	}
 }

@@ -18,8 +18,17 @@ func TestIsMediaURL(t *testing.T) {
 		{name: "uppercase extension", rawURL: "https://cdn.example.com/VIDEO.MP4", want: true},
 		{name: "m3u8 mime", rawURL: "https://cdn.example.com/playlist?id=1", mimeType: "application/vnd.apple.mpegurl; charset=utf-8", want: true},
 		{name: "mp4 mime", rawURL: "https://cdn.example.com/stream", mimeType: "video/mp4", want: true},
+		{name: "dash manifest", rawURL: "https://cdn.example.com/stream.mpd", want: true},
+		{name: "dash mime", rawURL: "https://cdn.example.com/manifest", mimeType: "application/dash+xml", want: true},
+		{name: "flv", rawURL: "https://cdn.example.com/live.flv?token=1", want: true},
+		{name: "webm mime", rawURL: "https://cdn.example.com/stream", mimeType: "video/webm", want: true},
+		{name: "m4s segment", rawURL: "https://cdn.example.com/video-1.m4s", want: true},
+		{name: "ts segment", rawURL: "https://cdn.example.com/seg-1.ts", want: true},
+		{name: "audio", rawURL: "https://cdn.example.com/track.m4a", want: true},
+		{name: "hls manifest without extension", rawURL: "https://cdn.example.com/play/index", mimeType: "application/x-mpegURL", want: true},
 		{name: "extension only in query", rawURL: "https://parser.example.com/watch?url=video.m3u8", want: false},
 		{name: "ordinary page", rawURL: "https://example.com/watch?v=1", mimeType: "text/html", want: false},
+		{name: "html with dots", rawURL: "https://example.com/v1.2/index", mimeType: "text/html; charset=utf-8", want: false},
 		{name: "unsupported scheme", rawURL: "file:///tmp/video.mp4", want: false},
 		{name: "invalid URL", rawURL: "://video.mp4", want: false},
 	}
@@ -31,6 +40,25 @@ func TestIsMediaURL(t *testing.T) {
 				t.Fatalf("isMediaURL() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestMediaScorePriority(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		rawURL string
+		want   int
+	}{
+		{rawURL: "https://cdn.example.com/master.m3u8", want: bestMediaScore},
+		{rawURL: "https://cdn.example.com/manifest.mpd", want: bestMediaScore},
+		{rawURL: "https://cdn.example.com/movie.mp4", want: 2},
+		{rawURL: "https://cdn.example.com/segment.m4s", want: 1},
+		{rawURL: "https://cdn.example.com/index.html", want: 0},
+	}
+	for _, test := range tests {
+		if got := mediaScore(test.rawURL, ""); got != test.want {
+			t.Fatalf("mediaScore(%q) = %d, want %d", test.rawURL, got, test.want)
+		}
 	}
 }
 
