@@ -44,6 +44,7 @@ type Browser struct {
 	userAgent      string
 	attemptWait    time.Duration
 	minDuration    time.Duration
+	official       *officialResolver
 }
 
 func NewBrowser(cfg BrowserConfig) (*Browser, error) {
@@ -70,6 +71,7 @@ func NewBrowser(cfg BrowserConfig) (*Browser, error) {
 		userAgent:      cfg.UserAgent,
 		attemptWait:    cfg.AttemptWait,
 		minDuration:    cfg.MinDuration,
+		official:       newOfficialResolver(cfg.UserAgent),
 	}
 	if _, err := browser.targetURL("https://example.com/video"); err != nil {
 		return nil, err
@@ -84,6 +86,9 @@ func (b *Browser) Sniff(ctx context.Context, rawURL string) (string, error) {
 	}
 	if isMediaURL(normalized, "") {
 		return normalized, nil
+	}
+	if mediaURL, err := b.official.resolve(ctx, normalized); err == nil {
+		return mediaURL, nil
 	}
 
 	targetURL, err := b.targetURL(normalized)
