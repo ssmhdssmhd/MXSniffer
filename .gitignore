@@ -1,0 +1,6 @@
+/MXSniffer
+/mxsniffer
+*.test
+coverage.out
+.env
+.DS_Store
