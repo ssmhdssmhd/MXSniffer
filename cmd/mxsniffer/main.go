@@ -15,7 +15,7 @@ import (
 	"github.com/ssmhdssmhd/MXSniffer/internal/sniffer"
 )
 
-const version = "0.0.2"
+const version = "0.0.3"
 
 type config struct {
 	listenAddr     string
@@ -89,7 +89,7 @@ func loadConfig() (config, error) {
 	cfg := config{
 		listenAddr:     ":1314",
 		browserURL:     "ws://127.0.0.1:9222",
-		parserTemplate: "https://video.isyour.love/player/getplayer?url={url}",
+		parserTemplate: "https://bfq.txnp.cn/player?url={url}",
 		userAgent:      sniffer.DefaultUserAgent,
 		requestTimeout: 45 * time.Second,
 		attemptWait:    8 * time.Second,
