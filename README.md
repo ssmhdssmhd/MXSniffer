@@ -6,6 +6,13 @@
 
 ## 更新日志
 
+### MXSniffer.0.0.2 202611140515
+
+- 默认解析器由已停止服务的 `jx.xmflv.com` 更换为 `video.isyour.love`。
+- 基于真实站点实测选择解析器：B 站、优酷可返回可播放的 HLS 地址，响应速度优于其他候选。
+- `ATTEMPT_WAIT` 默认调整为 `8s`，`REQUEST_TIMEOUT` 调整为 `45s`，以覆盖优酷等首屏加载较慢的站点。
+- README 增加解析器实测结果与选择说明。
+
 ### MXSniffer.0.0.1 202611140319
 
 - 首个 Go 版本，兼容原项目 `GET /node.js?url=...` 接口和 `1314` 端口。
@@ -14,13 +21,29 @@
 - 增加请求超时、一次自动重载、并发限制、健康检查和优雅退出。
 - 提供单元测试、Lightpanda 端到端测试、Dockerfile 与 Docker Compose 配置。
 
-当前版本：**v.0.0.1**
+当前版本：**v.0.0.2**
 
 ## 迁移分析
 
 原压缩包中的 JavaScript 项目已使用 REA `analyze-javascript-application` 进行静态分析。REA 识别出 `/node.js` 网络端点、`server.js` 入口和 Puppeteer 依赖；结合源码确认原流程为：视频页 URL → 第三方解析页 → 浏览器网络响应 → 媒体 URL。
 
 Go 版保留这一调用方式，并修复原实现中监听注册过晚、异常时浏览器可能未关闭、向客户端返回堆栈等问题。旧 PHP 项目中的数据库、缓存和硬编码凭据不属于本服务运行依赖，也未迁移到本仓库。
+
+## 解析器实测
+
+在同一 Lightpanda 环境下对候选解析器进行真实站点测试，单次请求超时 `45s`、每次监听 `8s`：
+
+| 解析器 | B 站 | 腾讯视频 | 优酷 | 其他 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| `video.isyour.love` | 200，约 5s | 200，约 5s | 200，约 16s，真实 HLS | 爱奇艺、芒果 404 | 选用，速度最快 |
+| `wpsseo.cn` | 200，约 7s | 200，约 7s | 404 | 爱奇艺 404；依赖 iframe 资源加载 | 备选，较慢 |
+| `api.uono.uno` | 404 | - | - | 爱奇艺 404 | 不可用 |
+| `jx.nnxv.cn` | 404 | - | - | 爱奇艺 404 | 不可用 |
+| `vip.xxphp.cn` | 404 | - | - | 爱奇艺 404 | 不可用 |
+| `jx.playerjy.com` | 502，TLS 连接失败 | - | - | - | 不可用 |
+| `t2.qlplayer.cyou` | 502，Cloudflare 522 | - | - | - | 不可用 |
+
+优酷首屏较慢，使用默认 `6s` 监听会漏掉地址，因此默认值调整为 `8s`。部分解析器可能返回版权提示占位视频，使用前建议校验返回内容。
 
 ## 接口
 
@@ -94,10 +117,10 @@ go run ./cmd/mxsniffer
 | --- | --- | --- |
 | `LISTEN_ADDR` | `:1314` | HTTP 监听地址 |
 | `LIGHTPANDA_WS_URL` | `ws://127.0.0.1:9222` | Lightpanda CDP WebSocket 地址 |
-| `PARSER_URL_TEMPLATE` | `https://jx.xmflv.com/?url={url}` | 解析页模板，`{url}` 会被替换为编码后的输入地址 |
+| `PARSER_URL_TEMPLATE` | `https://video.isyour.love/player/getplayer?url={url}` | 解析页模板，`{url}` 会被替换为编码后的输入地址 |
 | `USER_AGENT` | Chrome 131 浏览器 UA | 浏览器 User-Agent；Lightpanda 会忽略包含 `Mozilla` 的自定义值 |
-| `REQUEST_TIMEOUT` | `30s` | 单次 HTTP 嗅探总超时 |
-| `ATTEMPT_WAIT` | `6s` | 每次页面加载后的媒体监听时长 |
+| `REQUEST_TIMEOUT` | `45s` | 单次 HTTP 嗅探总超时 |
+| `ATTEMPT_WAIT` | `8s` | 每次页面加载后的媒体监听时长 |
 | `MAX_CONCURRENT_REQUESTS` | `2` | 同时执行的浏览器会话数 |
 
 ## 测试
