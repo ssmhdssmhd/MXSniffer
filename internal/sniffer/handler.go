@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -17,6 +18,7 @@ type api struct {
 	finder         mediaFinder
 	requestTimeout time.Duration
 	slots          chan struct{}
+	proxy          *mediaProxy
 }
 
 type apiResponse struct {
@@ -27,15 +29,37 @@ type apiResponse struct {
 }
 
 func NewHandler(finder mediaFinder, requestTimeout time.Duration, maxConcurrent int) http.Handler {
+	return newHandler(finder, requestTimeout, maxConcurrent, newMediaProxy(DefaultUserAgent))
+}
+
+func newHandler(finder mediaFinder, requestTimeout time.Duration, maxConcurrent int, proxy *mediaProxy) http.Handler {
 	handler := &api{
 		finder:         finder,
 		requestTimeout: requestTimeout,
 		slots:          make(chan struct{}, maxConcurrent),
+		proxy:          proxy,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /node.js", handler.sniff)
+	mux.HandleFunc("GET /play", handler.proxy.serveHTTP)
 	mux.HandleFunc("GET /healthz", handler.health)
-	return mux
+	return withCORS(mux)
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		header := writer.Header()
+		header.Set("Access-Control-Allow-Origin", "*")
+		header.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		header.Set("Access-Control-Allow-Headers", "Content-Type, Range, If-Range")
+		header.Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type")
+		header.Set("Access-Control-Max-Age", "86400")
+		if request.Method == http.MethodOptions {
+			writer.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
 }
 
 func (a *api) sniff(writer http.ResponseWriter, request *http.Request) {
@@ -59,7 +83,7 @@ func (a *api) sniff(writer http.ResponseWriter, request *http.Request) {
 	defer cancel()
 	mediaURL, err := a.finder.Sniff(ctx, rawURL)
 	if err == nil {
-		writeJSON(writer, http.StatusOK, apiResponse{Code: http.StatusOK, URL: mediaURL})
+		writeJSON(writer, http.StatusOK, apiResponse{Code: http.StatusOK, URL: a.responseURL(request, mediaURL)})
 		return
 	}
 	if request.Context().Err() != nil {
@@ -86,6 +110,24 @@ func (a *api) sniff(writer http.ResponseWriter, request *http.Request) {
 
 func (a *api) health(writer http.ResponseWriter, _ *http.Request) {
 	writeJSON(writer, http.StatusOK, apiResponse{Code: http.StatusOK, Status: "ok"})
+}
+
+// responseURL optionally wraps the playback URL with this service's /play
+// endpoint. Hotlink-protected hosts are proxied by default so browsers can
+// play them without a manually configured Referer.
+func (a *api) responseURL(request *http.Request, mediaURL string) string {
+	mode := request.URL.Query().Get("proxy")
+	if mode == "0" {
+		return mediaURL
+	}
+	parsed, err := url.Parse(mediaURL)
+	if err != nil {
+		return mediaURL
+	}
+	if mode != "1" && !isHotlinkProtectedHost(parsed.Hostname()) {
+		return mediaURL
+	}
+	return proxyMediaURL(requestBaseURL(request), mediaURL)
 }
 
 func writeJSON(writer http.ResponseWriter, status int, response apiResponse) {

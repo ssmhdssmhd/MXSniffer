@@ -15,7 +15,7 @@ import (
 	"github.com/ssmhdssmhd/MXSniffer/internal/sniffer"
 )
 
-const version = "0.0.7"
+const version = "0.0.8"
 
 type config struct {
 	listenAddr     string
@@ -56,9 +56,10 @@ func run() error {
 		Addr:              cfg.listenAddr,
 		Handler:           sniffer.NewHandler(browser, cfg.requestTimeout, cfg.maxConcurrent),
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      cfg.requestTimeout + 5*time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		// Media proxying streams large files, so writes must not be capped.
+		WriteTimeout:   0,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	serverErrors := make(chan error, 1)

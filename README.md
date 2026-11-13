@@ -6,6 +6,14 @@
 
 ## 更新日志
 
+### MXSniffer.0.0.8 202611140630
+
+- 所有接口增加 CORS 响应头，支持 `OPTIONS` 预检，前端可直接跨域调用。
+- 新增 `/play` 播放代理，透传 `Range` 分段并自动补充 B 站 `Referer`，解决浏览器 403。
+- `/node.js` 默认把 B 站 CDN 地址包装为代理地址，代理域名按请求动态生成，不写死。
+- 支持 `?proxy=0` 关闭代理、`?proxy=1` 强制代理；代理拒绝内网与本机地址。
+- 流式代理场景取消服务端写超时，避免大文件播放被中断。
+
 ### MXSniffer.0.0.7 202611140605
 
 - 新增官方直链解析：B 站视频优先调用官方接口获取真实 MP4 地址，不再经过第三方解析页。
@@ -50,7 +58,7 @@
 - 增加请求超时、一次自动重载、并发限制、健康检查和优雅退出。
 - 提供单元测试、Lightpanda 端到端测试、Dockerfile 与 Docker Compose 配置。
 
-当前版本：**v.0.0.7**
+当前版本：**v.0.0.8**
 
 ## 迁移分析
 
@@ -115,6 +123,41 @@ curl --get \
 ```
 
 如果输入本身就是可识别的媒体地址（如 `.m3u8`、`.mpd`、`.mp4`、`.flv`），服务会直接返回该地址，不启动浏览器会话。
+
+### 跨域与播放代理
+
+所有接口均返回以下 CORS 头，允许任意来源跨域调用：
+
+```http
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, HEAD, OPTIONS
+Access-Control-Allow-Headers: Content-Type, Range, If-Range
+Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges, Content-Type
+```
+
+`OPTIONS` 预检请求返回 `204`。
+
+B 站官方地址有防盗链，浏览器直接播放会 403。接口默认把 B 站 CDN 地址包装成本服务地址：
+
+```json
+{"code":200,"url":"http://你的服务地址/play?url=https%3A%2F%2F...bilivideo.com%2F...mp4"}
+```
+
+代理地址根据请求的 `Host`（支持 `X-Forwarded-Host` / `X-Forwarded-Proto`）动态生成，不写死域名。播放代理支持 `Range` 分段，可直接拖动进度条，并自动补上 `Referer`。
+
+可通过 `proxy` 参数控制：
+
+- `?proxy=0`：返回原始媒体地址
+- `?proxy=1`：强制所有地址走代理
+- 默认：仅 B 站 CDN 地址走代理，其他站点原样返回
+
+直接访问代理：
+
+```http
+GET /play?url={经过URL编码的媒体地址}
+```
+
+代理仅允许公网 HTTP(S) 地址，会拒绝本机、内网、链路本地等地址，避免被当作内网探测工具。
 
 ### 健康检查
 
