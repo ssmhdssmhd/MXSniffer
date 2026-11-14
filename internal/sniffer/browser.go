@@ -13,7 +13,6 @@ import (
 
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
@@ -146,7 +145,6 @@ func (b *Browser) sniffNormalized(ctx context.Context, normalized string) (strin
 
 	if err := chromedp.Run(browserContext,
 		network.Enable(),
-		page.Enable(),
 		emulation.SetUserAgentOverride(b.userAgent),
 	); err != nil {
 		return "", fmt.Errorf("initialize Lightpanda session: %w", err)
@@ -181,15 +179,9 @@ func (b *Browser) sniffNormalized(ctx context.Context, normalized string) (strin
 
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt == 0 {
-			err = chromedp.Run(browserContext,
-				chromedp.Navigate(targetURL),
-				chromedp.WaitReady("body", chromedp.ByQuery),
-			)
+			err = chromedp.Run(browserContext, chromedp.Navigate(targetURL))
 		} else {
-			err = chromedp.Run(browserContext,
-				chromedp.Reload(),
-				chromedp.WaitReady("body", chromedp.ByQuery),
-			)
+			err = chromedp.Run(browserContext, chromedp.Reload())
 		}
 		if err != nil {
 			return "", fmt.Errorf("load parser page: %w", err)

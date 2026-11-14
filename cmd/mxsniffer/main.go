@@ -15,7 +15,7 @@ import (
 	"github.com/ssmhdssmhd/MXSniffer/internal/sniffer"
 )
 
-const version = "0.0.11"
+const version = "0.0.12"
 
 type config struct {
 	listenAddr     string
@@ -94,12 +94,12 @@ func loadConfig() (config, error) {
 	cfg := config{
 		listenAddr:     ":1314",
 		browserURL:     "ws://127.0.0.1:9222",
-		parserTemplate: "https://bfq.txnp.cn/player?url={url}",
+		parserTemplate: "https://art.txnp.cn/?url={url}",
 		userAgent:      sniffer.DefaultUserAgent,
 		requestTimeout: 45 * time.Second,
 		attemptWait:    8 * time.Second,
 		minDuration:    60 * time.Second,
-		cacheTTL:       2 * time.Minute,
+		cacheTTL:       0,
 		maxConcurrent:  2,
 	}
 

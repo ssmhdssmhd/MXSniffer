@@ -94,11 +94,19 @@ func (r *officialResolver) resolve(ctx context.Context, rawURL string) (string, 
 }
 
 func (r *officialResolver) resolveBvid(ctx context.Context, bvid string) (string, error) {
-	// A first visit sets the buvid cookies required by the public APIs.
-	if _, err := r.get(ctx, r.homeURL); err != nil {
-		return "", fmt.Errorf("prime bilibili cookies: %w", err)
+	// Most public videos do not need a cookie. Try the APIs first and only
+	// prime cookies when the API rejects the request.
+	mediaURL, err := r.requestBvid(ctx, bvid)
+	if err == nil || ctx.Err() != nil {
+		return mediaURL, err
 	}
+	if _, primeErr := r.get(ctx, r.homeURL); primeErr != nil {
+		return "", fmt.Errorf("prime bilibili cookies: %w", primeErr)
+	}
+	return r.requestBvid(ctx, bvid)
+}
 
+func (r *officialResolver) requestBvid(ctx context.Context, bvid string) (string, error) {
 	var view bilibiliViewResponse
 	if err := r.getJSON(ctx, r.viewAPI+"?bvid="+url.QueryEscape(bvid), &view); err != nil {
 		return "", err

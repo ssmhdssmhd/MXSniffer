@@ -81,6 +81,36 @@ func TestOfficialResolverFallsBackToDash(t *testing.T) {
 	}
 }
 
+func TestOfficialResolverSkipsCookiePrimeWhenAPIWorks(t *testing.T) {
+	t.Parallel()
+	homeRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/":
+			homeRequests++
+			fmt.Fprint(writer, "<html></html>")
+		case "/view":
+			fmt.Fprint(writer, `{"code":0,"data":{"cid":1}}`)
+		case "/play":
+			fmt.Fprint(writer, `{"code":0,"data":{"durl":[{"url":"https://cdn.example.com/direct.mp4"}]}}`)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	mediaURL, err := newTestResolver(server).resolveBvid(context.Background(), "BV1xx411c7mD")
+	if err != nil {
+		t.Fatalf("resolveBvid: %v", err)
+	}
+	if mediaURL != "https://cdn.example.com/direct.mp4" {
+		t.Fatalf("mediaURL = %q", mediaURL)
+	}
+	if homeRequests != 0 {
+		t.Fatalf("home requests = %d, want 0", homeRequests)
+	}
+}
+
 func TestOfficialResolverRejectsUnsupportedHost(t *testing.T) {
 	t.Parallel()
 	_, err := (&officialResolver{}).resolve(context.Background(), "https://example.com/video/123")

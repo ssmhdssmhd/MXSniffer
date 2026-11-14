@@ -6,6 +6,14 @@
 
 ## 更新日志
 
+### MXSniffer.0.0.12 202611140811
+
+- 默认 `CACHE_TTL=0`，每次调用都重新解析，不使用跨请求结果缓存；请求内重复清单下载仍复用，避免额外网络请求。
+- 默认解析器直连 `https://art.txnp.cn/?url={url}`，去掉旧入口到最终页面的重定向。
+- B 站官方接口先直接请求，只有被拦截时才访问首页补 cookie 并重试，减少一次首页请求。
+- 媒体监听不再等待 `body` 就绪，保留媒体优先级、时长校验、源站验证和失败重试。
+- `CACHE_TTL=0` 三轮真实测速：B 站 `0.161s/0.143s/0.114s`，腾讯 `5.607s/3.137s/3.291s`，优酷 `7.591s/7.228s/7.416s`，均返回 200；腾讯清单约 30.2 分钟、优酷约 7.7 分钟，B 站代理 Range 返回 206。
+
 ### MXSniffer.0.0.11 202611140736
 
 - 优化 `/node.js` 响应速度：同一请求中的时长校验与源站还原复用清单下载，不再重复请求。
@@ -78,7 +86,7 @@
 - 增加请求超时、一次自动重载、并发限制、健康检查和优雅退出。
 - 提供单元测试、Lightpanda 端到端测试、Dockerfile 与 Docker Compose 配置。
 
-当前版本：**v.0.0.11**
+当前版本：**v.0.0.12**
 
 ## 迁移分析
 
@@ -88,7 +96,7 @@ Go 版保留这一调用方式，并修复原实现中监听注册过晚、异�
 
 ## 解析器
 
-默认解析器：`https://bfq.txnp.cn/player?url={url}`，实测稳定返回真实 HLS（`#EXTM3U`）播放列表：
+默认解析器：`https://art.txnp.cn/?url={url}`，实测稳定返回真实 HLS（`#EXTM3U`）播放列表：
 
 | 站点 | 结果 | 耗时 |
 | --- | --- | --- |
@@ -245,12 +253,12 @@ go run ./cmd/mxsniffer
 | --- | --- | --- |
 | `LISTEN_ADDR` | `:1314` | HTTP 监听地址 |
 | `LIGHTPANDA_WS_URL` | `ws://127.0.0.1:9222` | Lightpanda CDP WebSocket 地址 |
-| `PARSER_URL_TEMPLATE` | `https://bfq.txnp.cn/player?url={url}` | 解析页模板，`{url}` 会被替换为编码后的输入地址 |
+| `PARSER_URL_TEMPLATE` | `https://art.txnp.cn/?url={url}` | 解析页模板，`{url}` 会被替换为编码后的输入地址 |
 | `USER_AGENT` | Chrome 131 浏览器 UA | 浏览器 User-Agent；Lightpanda 会忽略包含 `Mozilla` 的自定义值 |
 | `REQUEST_TIMEOUT` | `45s` | 单次 HTTP 嗅探总超时 |
 | `ATTEMPT_WAIT` | `8s` | 每次页面加载后的媒体监听时长 |
 | `MIN_MEDIA_DURATION` | `60s` | HLS 播放列表最短总时长，低于该值不返回；设为 `0` 关闭过滤并允许分片兜底 |
-| `CACHE_TTL` | `2m` | 成功结果缓存时间，相同视频重复调用直接返回；设为 `0` 关闭缓存 |
+| `CACHE_TTL` | `0` | 默认不使用跨请求结果缓存；需要时设为 `2m` 等时长开启成功结果缓存 |
 | `MAX_CONCURRENT_REQUESTS` | `2` | 同时执行的浏览器会话数 |
 
 ## 测试

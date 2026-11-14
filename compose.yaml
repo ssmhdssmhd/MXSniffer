@@ -14,5 +14,6 @@ services:
       - lightpanda
     environment:
       LIGHTPANDA_WS_URL: ws://lightpanda:9222
+      CACHE_TTL: "0"
     ports:
       - "1314:1314"
